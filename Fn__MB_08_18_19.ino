@@ -11,10 +11,11 @@
 
 //Constants (change these as necessary)
 #define LED_PIN   9  //Pin for the pixel strand. Can be analog or digital.
-#define LED_TOTAL 50  //Change this to the number of LEDs in your strand.
+#define LED_TOTAL 52  //Change this to the number of LEDs in your strand.
 #define LED_HALF  LED_TOTAL/2
+
 #define VISUALS   6   //Change this accordingly if you add/remove a visual in the switch-case in Visualize()
-#define fadePercent 1
+#define fadePercent .90
 
 #define AUDIO_PIN A5  //Pin for the envelope of the sound detector
 #define KNOB_PIN  A0  //Pin for the trimpot 10K
@@ -45,6 +46,11 @@ float knob = 1023.0;  //Holds the percentage of how twisted the trimpot is. Used
 float avgBump = 0;    //Holds the "average" volume-change to trigger a "bump."
 float avgVol = 0;     //Holds the "average" volume-level to proportionally adjust the visual experience.
 float shuffleTime = 0;  //Holds how many seconds of runtime ago the last shuffle was (if shuffle mode is on).
+
+const int maxScale = 8;
+const int redZone = 5;
+const int sampleWindow = 50; // Sample window width in mS (50 mS = 20Hz)
+unsigned int sample;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //NOTE: The reason "average" is quoted is because it is not a true mathematical average. This is because I have
@@ -87,18 +93,45 @@ void setup() {
 
 void loop() {  //This is where the magic happens. This loop produces each frame of the visual.
 
-  volume = analogRead(AUDIO_PIN);       //Record the volume level from the sound detector
+//  volume = analogRead(AUDIO_PIN);       //Record the volume level from the sound detector
   knob = analogRead(KNOB_PIN) / 1023.0; //Record how far the trimpot is twisted
 
+//measures microphone volume
+   unsigned long startMillis= millis();  // Start of sample window
+   unsigned int peakToPeak = 0;   // peak-to-peak level
+   unsigned int signalMax = 0;
+   unsigned int signalMin = 1024;
+   // collect data for 50 mS
+   while (millis() - startMillis < sampleWindow)
+   {
+      sample = analogRead(AUDIO_PIN);
+      if (sample < 1024)  // toss out spurious readings
+      {
+         if (sample > signalMax)      {signalMax = sample;}  // save just the max levels
+         else if (sample < signalMin) {signalMin = sample;}  // save just the min levels
+      }
+   }
+   peakToPeak = signalMax - signalMin;  // max - min = peak-peak amplitude
+
+   double volts = (peakToPeak * 5.0) / 1024;  // convert to volts
+
+   volts = volts*200;
+   if (volts > 255) {volume = 255;} //map volume to volts
+   else {volume = volts;}
+   
+Serial.print("volume = ");
+Serial.println(volume);
+   
   //Sets a threshold for volume.
-  //  In practice I've found noise can get up to 15, so if it's lower, the visual thinks it's silent.
+  //  In practice I've found noise can get up to 150, so if it's lower, the visual thinks it's silent.
   //  Also if the volume is less than average volume / 2 (essentially an average with 0), it's considered silent.
-  if (volume < avgVol / 2.0 || volume < 15) volume = 0;
+  if (volume < avgVol / 2.0 || volume < 150) volume = 0;
 
   else avgVol = (avgVol + volume) / 2.0; //If non-zeo, take an "average" of volumes.
 
   //If the current volume is larger than the loudest value recorded, overwrite
   if (volume > maxVol) maxVol = volume;
+
 
   //Check the Cycle* functions for specific instructions if you didn't include buttons in your design.
   ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -117,13 +150,13 @@ void loop() {  //This is where the magic happens. This loop produces each frame 
     maxVol = (maxVol + volume) / 2.0;
   }
 
-  //If there is a decent change in volume since the last pass, average it into "avgBump"
+  //**SENSITIVITY VARIABLE: If there is a decent change in volume since the last pass, average it into "avgBump"
   if (volume - last > 10) avgBump = (avgBump + (volume - last)) / 2.0;
 
   //If there is a notable change in volume, trigger a "bump"
   //  avgbump is lowered just a little for comparing to make the visual slightly more sensitive to a beat.
-  bump = (volume - last > avgBump * .9);  
-
+  bump = (volume - last > avgBump * .9); 
+  
   //If a "bump" is triggered, average the time between bumps
   if (bump) {
     avgTime = (((millis() / 1000.0) - timeBump) + avgTime) / 2.0;
@@ -136,9 +169,7 @@ void loop() {  //This is where the magic happens. This loop produces each frame 
 
   last = volume; //Records current volume for next pass
 
-  delay(30);     //Paces visuals so they aren't too fast to be enjoyable
-  Serial.print("Volume: ");
-  Serial.println(volume);
+  delay(20);     //Paces visuals so they aren't too fast to be enjoyable
 }
 //////////</Standard Functions>
 
@@ -155,7 +186,7 @@ void Visualize() {
     case 4: return PaletteDance();
     case 5: return Glitter();
     case 6: return Paintball();
-    default: return Pulse();
+    default: return PaletteDance();
   }
 }
 
@@ -197,10 +228,10 @@ uint32_t ColorPalette(float num) {
 //Pulse from center of the strand
 void Pulse() {
 
-  fade(0.85*fadePercent);   //Listed below, this function simply dims the colors a little bit each pass of loop()
+  fade(.85*fadePercent);   //Listed below, this function simply dims the colors a little bit each pass of loop()
 
   //Advances the palette to the next noticeable color if there is a "bump"
-  if (bump) gradient += thresholds[palette] / 24;
+  if (bump) gradient += thresholds[palette] / 24;   //**finetune this portion for color change scaling
 
   //If it's silent, we want the fade effect to take over, hence this if-statement
   if (volume > 0) {
@@ -234,8 +265,17 @@ void Pulse() {
         avgCol += colors[k];
         avgCol2 += split(col2, k);
       }
+//**TO DO : IF NEW SAMPLE IS WITHIN X AMOUNT OF PREVIOUS SAMPLE, DO NOT REFRESH BRIGHTNESS.
+
       avgCol /= 3.0, avgCol2 /= 3.0;
 
+/*
+      avgCol = 5* (int)round(avgCol / 1.5), avgCol2 = 5* (int)round(avgCol2 / 1.5);
+      Serial.print("avgCol: ");
+      Serial.println(avgCol);
+      Serial.print("avgCol2 ");
+      Serial.println(avgCol2);
+*/
       //Compare the average colors as "brightness". Only overwrite dim colors so the fade effect is more apparent.
       if (avgCol > avgCol2) strand.setPixelColor(i, strand.Color(colors[0], colors[1], colors[2]));
     }
@@ -243,7 +283,6 @@ void Pulse() {
   //This command actually shows the lights. If you make a new visualization, don't forget this!
   strand.show();
 }
-
 
 //PALETTEPULSE
 //Same as Pulse(), but colored the entire pallet instead of one solid color
@@ -540,6 +579,13 @@ void Paintball() {
 }
 
 
+
+
+
+
+
+
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 //DEBUG CYCLE
 //No reaction to sound, merely to see gradient progression of color palettes
@@ -595,7 +641,6 @@ void CycleVisual() {
   }
 }
 //////////////////////////////////////////////////////////////////////////////////////////////////////
-
 
 //Fades lights by multiplying them by a value between 0 and 1 each pass of loop().
 void fade(float damper) {
