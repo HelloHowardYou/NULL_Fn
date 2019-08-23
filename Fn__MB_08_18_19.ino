@@ -14,7 +14,7 @@
 #define LED_TOTAL 52  //Change this to the number of LEDs in your strand.
 #define LED_HALF  LED_TOTAL/2
 
-#define VISUALS   6   //Change this accordingly if you add/remove a visual in the switch-case in Visualize()
+#define VISUALS   5   //Change this accordingly if you add/remove a visual in the switch-case in Visualize()
 #define fadePercent .90
 
 #define AUDIO_PIN A5  //Pin for the envelope of the sound detector
@@ -115,17 +115,14 @@ void loop() {  //This is where the magic happens. This loop produces each frame 
 
    double volts = (peakToPeak * 5.0) / 1024;  // convert to volts
 
-   volts = volts*200;
+   volts = volts*180;
    if (volts > 255) {volume = 255;} //map volume to volts
    else {volume = volts;}
-   
-Serial.print("volume = ");
-Serial.println(volume);
    
   //Sets a threshold for volume.
   //  In practice I've found noise can get up to 150, so if it's lower, the visual thinks it's silent.
   //  Also if the volume is less than average volume / 2 (essentially an average with 0), it's considered silent.
-  if (volume < avgVol / 2.0 || volume < 150) volume = 0;
+  if (volume < avgVol / 2.0 || volume < 145) volume = 0;
 
   else avgVol = (avgVol + volume) / 2.0; //If non-zeo, take an "average" of volumes.
 
@@ -155,7 +152,7 @@ Serial.println(volume);
 
   //If there is a notable change in volume, trigger a "bump"
   //  avgbump is lowered just a little for comparing to make the visual slightly more sensitive to a beat.
-  bump = (volume - last > avgBump * .9); 
+  bump = (volume - last > avgBump * .8); 
   
   //If a "bump" is triggered, average the time between bumps
   if (bump) {
@@ -170,6 +167,8 @@ Serial.println(volume);
   last = volume; //Records current volume for next pass
 
   delay(20);     //Paces visuals so they aren't too fast to be enjoyable
+  Serial.print("volume = ");
+  Serial.println(volume);
 }
 //////////</Standard Functions>
 
@@ -182,10 +181,9 @@ void Visualize() {
     case 0: return Pulse();
     case 1: return PalettePulse();
     case 2: return Traffic();
-    case 3: return Snake();
-    case 4: return PaletteDance();
-    case 5: return Glitter();
-    case 6: return Paintball();
+    case 3: return PaletteDance();
+    case 4: return Glitter();
+    case 5: return Paintball();
     default: return PaletteDance();
   }
 }
